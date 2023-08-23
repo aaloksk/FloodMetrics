@@ -1,0 +1,193 @@
+###########################################################################################
+# Function used to obtain coefficients and Metrics for each distribution
+# Takes the object fitted using fitdistrplus
+# Extracts - Shape, Scale, SDShape, SDscale, Loglikelihood and AIC
+metricx <- function(obj){
+  llnam <- obj$distname
+  llest <- as.vector(obj$estimate) # coefficients
+  llsd <- as.vector(obj$sd) # std. errors
+  lllik <- as.vector(obj$loglik) #loglikelihood
+  llaic <- as.vector(obj$aic)  # AIC value
+  zz <- data.frame(llnam,llest[1],llest[2],llsd[1],llsd[2],lllik,llaic)
+  return(zz)
+}
+###########################################################################################
+
+
+###########################################################################################
+# Fit 5 candidate distributions and get their metrics
+# normal, lognormal, weibull, gamma and logistic
+# Use MLE for estimation
+candfit <- function(X){
+
+  library('fitdistrplus')
+  library("actuar") # for loglogisitic function
+
+
+  zz <- data.frame()
+
+  X.dist <- fitdist(X,'norm',method='mle')
+  X.met <- metricx(X.dist)
+  zz <- rbind(zz,X.met)
+
+  X.dist <- fitdist(X,'lnorm',method='mle')
+  X.met <- metricx(X.dist)
+  zz <- rbind(zz,X.met)
+
+  X.dist <- fitdist(X,'weibull',method='mle')
+  X.met <- metricx(X.dist)
+  zz <- rbind(zz,X.met)
+
+  X.dist <- fitdist(X,'gamma',method='mle', lower = c(0, 0))
+  X.met <- metricx(X.dist)
+  zz <- rbind(zz,X.met)
+
+  X.dist <- fitdist(X,'llogis',method='mle')
+  X.met <- metricx(X.dist)
+  zz <- rbind(zz,X.met)
+
+  colnames(zz) <- c('Dist_name','shape','scale','SEshape','SEscale','Loglik','AIC')
+
+  return(zz)
+}
+###########################################################################################
+
+
+###########################################################################################
+#FIt exponential distribution
+timefit <- function(X){
+  exp_fit <- fitdist(X,'exp',method='mle')
+  zz1 <- metricx(exp_fit)
+
+  gam_fit <- fitdist(X,'gamma',method='mle', lower = c(0, 0))
+  zz2 <- metricx(gam_fit)
+
+  zz <- rbind(zz1,zz2)
+  colnames(zz) <- c('Dist_name','shape','scale','SEshape','SEscale','Loglik','AIC')
+
+  return(zz)
+}
+###########################################################################################
+
+
+###########################################################################################
+# Function to perform bivariate empirical distribution
+gringorten2D <- function(idx,X){
+  dat <- X
+  val <- X[idx,]
+  kk <- ifelse((dat[,1]<=val[1] & dat[,2]<=val[2]),1,0)
+  zz <- (sum(kk) - 0.12)/(nrow(X)+0.44)
+  return(zz)
+}
+###########################################################################################
+
+
+library(VineCopula)
+
+
+#Setting working directory
+path <- 'C:\\Users\\Aalok\\OneDrive - lamar.edu\\0000000000Research\\Flooding_Risk\\Station1'
+setwd(path)
+
+df <- read.csv('Stn1_Flood_over_thres.csv')
+head(df)
+
+#Time to peak
+df$Tim2Pk <- as.integer(difftime(df$TPeak, df$Start_Date, units="days"))
+head(df)
+
+#Volume
+X_Vol <- df$Volume
+
+#DUration
+X_Dur <- df$Duration
+
+#Flood Peaks
+X_Peaks <- df$QPeak
+
+#Time to peak
+X_time2peak <- df$Tim2Pk
+
+
+#Fit Volume
+fit_Vol <- candfit(X_Vol)
+
+#Fit Duration
+fit_Dur <- candfit(X_Dur)
+#fit_Dur <- timefit(X_Dur)
+
+
+#Select Best fit
+#Volume
+min_index <- which.min(fit_Vol$AIC) # Find the index of the row with the lowest value in column AIC
+best_Vol <- fit_Vol[min_index, ] # Extract the row with the lowest value in column AIC
+
+#Duration
+min_index <- which.min(fit_Dur$AIC) # Find the index of the row with the lowest value in column AIC
+best_Dur <- fit_Dur[min_index, ] # Extract the row with the lowest value in column AIC
+
+
+
+pVol <- plnorm(X_Vol,best_Vol$shape, best_Vol$scale)
+pDur <- plnorm(X_Dur,best_Dur$shape, best_Dur$scale)
+
+
+aa <- BiCopSelect(pVol,pDur,familyset=c(1:6))
+
+
+#Create sequence of two variables
+Vols <- seq(min(X_Vol), max(X_Vol), ((max(X_Vol)-min(X_Vol))/200))
+Durs <- seq(min(X_Dur), max(X_Dur), ((max(X_Dur)-min(X_Dur))/200))
+
+#Probabilities
+pVols <- plnorm(Vols,best_Vol$shape, best_Vol$scale)
+pDurs <- plnorm(Durs,best_Dur$shape, best_Dur$scale)
+
+pars <- expand.grid(pVols,pDurs)
+jprob <- BiCopCDF(pars[,1],pars[,2],family=5,par=0.38)
+jpmat <- matrix(jprob,201,201,byrow=F)
+contour(Vols,Durs,jpmat,levels=c(0.1,0.2,0.3,0.4,0.5,0.6,0.7,0.8,0.9,0.95),xlab='Volume',ylab='Duration',col='blue')
+
+
+#Best fit of volume
+shp <- 2.029116e+01
+sc <- 6.620352e-01
+pVol <- plnorm(X_Vol,meanlog=shp,sdlog=sc )
+
+#Best fit of Duration
+pDur <- pgamma(X_Dur,shape=5.28965687,scale=1/0.2727811)
+
+
+# Joint Probability using 2D Gringorten
+X <- cbind(X_Vol,X_Dur)
+idx <- 1:nrow(X)
+FX <- sapply(idx,gringorten2D,X)
+FXX <- cbind(X,FX)
+
+#Copula
+aa <- BiCopSelect(pVol,pDur,familyset=c(1:9),rotations=TRUE)
+jprob <- BiCopCDF(pVol,pDur,family=aa$family,par=aa$par,par2=aa$par2)
+az <- cbind(FXX,jprob)
+colnames(az) <- c('Vol','Dur','Empirical','Theoritical')
+
+#PP Plot
+plot(FX,jprob, xlab = 'Empirical Probability', ylab = 'Theoritical Probability', main = "VOl-Dur")
+abline(coef = c(0,1), col='blue',lw=2)
+
+#Storing copula information
+zz <- data.frame(aa$familyname, aa$par,aa$par2, aa$tau, aa$logLik, aa$AIC)
+colnames(zz) <- c('FamilyName','Parameter','Parameter2','Tau','LogLik','AIC')
+zz
+
+
+#Create sequence of two variables
+Vols <- seq(min(X_Vol), max(X_Vol), ((max(X_Vol)-min(X_Vol))/200))
+Durs <- seq(min(X_Dur), max(X_Dur), ((max(X_Dur)-min(X_Dur))/200))
+
+pVols <- plnorm(Vols,meanlog=shp,sdlog=sc )
+pDurs <- pgamma(Durs,shape=5.28965687,scale=1/0.2727811)
+
+pars <- expand.grid(pVols,pDurs)
+jprob <- BiCopCDF(pVols,pDurs,family=16,par=1.49)
+jpmat <- matrix(jprob,201,201,byrow=F)
+contour(Vols,Durs,jpmat,levels=c(0.1,0.2,0.3,0.4,0.5,0.6,0.7,0.8,0.9,0.95),xlab='X1',ylab='X2',col='blue')

@@ -1,0 +1,5 @@
+
+#hile installing any package if there is an error w/ '00LOCK', use this sequence to solve the issue
+
+options("install.lock"=FALSE)
+install.packages("forecast")

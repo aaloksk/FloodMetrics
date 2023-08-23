@@ -1,0 +1,203 @@
+#Fitting the peak annual streamflows to various distributions
+#Aalok Sharma Kafle
+
+#Intalling packages
+library('extRemes')
+library('fitdistrplus')
+library("actuar") # for loglogisitic function
+library(lfstat) #For gringorten
+library('nortest')
+library('evd')
+
+
+###########################################################################################
+# Fit 5 candidate distributions and get their metrics
+# normal, lognormal, weibull, gamma and logistic
+# Use MLE for estimation
+candfit <- function(X)
+{
+  zz <- data.frame()
+
+  X.dist <- fitdist(X,'norm',method='mle')
+  X.met <- metricx(X.dist)
+  zz <- rbind(zz,X.met)
+
+  X.dist <- fitdist(X,'lnorm',method='mle')
+  X.met <- metricx(X.dist)
+  zz <- rbind(zz,X.met)
+
+  X.dist <- fitdist(X,'weibull',method='mle')
+  X.met <- metricx(X.dist)
+  zz <- rbind(zz,X.met)
+
+  X.dist <- fitdist(X,'gamma',method='mle', lower = c(0, 0))
+  X.met <- metricx(X.dist)
+  zz <- rbind(zz,X.met)
+
+  X.dist <- fitdist(X,'llogis',method='mle')
+  X.met <- metricx(X.dist)
+  zz <- rbind(zz,X.met)
+
+  colnames(zz) <- c('Dist_name','shape','scale','SEshape','SEscale','Loglik','AIC')
+
+  return(zz)
+}
+
+# Function used to obtain coefficients and Metrics for each distribution
+# Takes the object fitted using fitdistrplus
+# Extracts - Shape, Scale, SDShape, SDscale, Loglikelihood and AIC
+metricx <- function(obj)
+{
+  llnam <- obj$distname
+  llest <- as.vector(obj$estimate) # coefficients
+  llsd <- as.vector(obj$sd) # std. errors
+  lllik <- as.vector(obj$loglik) #loglikelihood
+  llaic <- as.vector(obj$aic)  # AIC value
+  zz <- data.frame(llnam,llest[1],llest[2],llsd[1],llsd[2],lllik,llaic)
+  return(zz)
+}
+
+
+#FUnction that gives cumulative density of the specified distribution
+pfunction <- function(dbn,P,shp,sc)
+{
+  if (dbn == "norm")   {
+    pP = pnorm(P,mean=shp,sd=sc)  }
+  if (dbn == "lnorm")   {
+    pP = plnorm(P,meanlog=shp,sdlog=sc)  }
+  else if (dbn == "gamma")   {
+    pP = pgamma(P,shape=shp,scale=1/sc)  }
+  else if (dbn == "weibull")  {
+    pP = pweibull(P,shape=shp,scale=sc)  }
+  else if (dbn == "llogis")   {
+    pP = pllogis(P,shape=shp,scale=sc)  }
+  return(pP)
+}
+###########################################################################################
+
+
+
+###########################################################################################
+#Setting working directory
+path <- 'C:\\Users\\Aalok\\OneDrive - lamar.edu\\0000000000Research\\Flooding_Risk\\Station1'
+setwd(path)
+
+#Importing data for ith station
+Stn <- read.csv('Stn1_08041500.csv')
+
+###########################################################################################
+###########################################################################################
+#Distributioions fromm fitdistrplus
+
+#Extracting peak flow data
+PeakF <- Stn$peak_va
+
+#Dataframe for fitted metrics
+fit_params <- data.frame()
+adt_df <- data.frame()
+
+
+#Empirical Distribution
+X <- sort(PeakF, decreasing=FALSE)
+PeakF.emp <- gringorten(X)
+
+
+#Fitting distributions using the candfit function developed above
+fit <- candfit(X)
+
+#Stn and fit params
+fit$StnID <- 08041500
+
+
+#Number of distributions fitted to generate plots for each
+n_fits <- nrow(fit)
+
+ks_df <- data.frame()
+
+
+for(j in seq(1,n_fits,1)){
+  PeakF.theo <- pfunction(fit$Dist_name[j], X, fit$shape[j], fit$scale[j])
+
+  lab <- fit$Dist_name[j]
+
+  #plot (PeakF.emp,PeakF.theo, xlab = 'Empirical Probability', ylab = 'Theoritical Probability', main = paste(lab,"-",08041500))
+  #abline(coef = c(0,1), col='blue',lw=2)
+
+  ks_i <- ks.test(PeakF.emp,PeakF.theo)
+  ks_stat <- ks_i$statistic
+  ks_pval <- ks_i$p.value
+
+  ks_params <- c(ks_stat, ks_pval)
+  ks_df <- rbind(ks_df, ks_params)
+  colnames(ks_df) <-c('KS_stat', 'KS_pval')
+
+
+
+  adt_i <- ad.test(PeakF.theo)
+  adt_df <- rbind(adt_df, adt_i)
+}
+
+fit$KS_stat <- ks_df$KS_stat
+fit$KS_pval <- ks_df$KS_pval
+
+#Appending all results
+fit_params <- rbind(fit_params, fit)
+fit_params
+
+###########################################################################################\
+###########################################################################################
+#GEV and Gumbel from extremes
+
+#generalized extreme value (GEV) distribution function
+fit1 <- fevd(X, type="GEV")
+fit1
+plot(fit1)
+
+#Gumbel
+fit2 <- fevd(X, type="Gumbel")
+plot(fit2)
+
+loc1 <- as.numeric(fit1$results$par[1])
+scl1 <- as.numeric(fit1$results$par[2])
+shp1 <- as.numeric(fit1$results$par[3])
+
+loc2 <- as.numeric(fit2$results$par[1])
+scl2 <- as.numeric(fit2$results$par[2])
+
+
+res_GEV <- data.frame(Location = loc1, Scale = scl1,Shape = shp1)
+res_Gum <- data.frame(Location = loc2, Scale = scl2,Shape = NA)
+rbind(res_GEV,res_Gum)
+
+###########################################################################################
+###########################################################################################
+###Comparison Between Best-Fit and GEV
+
+#List of percentiles
+p <- c(0.05,seq(0.1,0.9,0.005), 0.95)
+
+#Station1
+sample1 <- qlnorm(p, meanlog=9.184,sdlog = 0.975997)
+sample2 <- qgev(p, loc=7106.564, shape = 0.605009, scale=6221.046)
+
+# Perform the KS test
+res <- ks.test(sample1, sample2)
+
+dfi <- data.frame(res$statistic, res$p.value)
+
+# Calculate ECDFs of the two samples
+ecdf1 <- ecdf(sample1)
+ecdf2 <- ecdf(sample2)
+
+# Plot cumulative distribution functions of the two samples
+svg("CDF_BF_GEV.svg", width=6, height=6)
+plot(ecdf1, main="Station 1 - CDFs", xlab="Values", ylab="Probability", col="red")
+lines(ecdf2, col="blue")
+legend("bottomright", c("BestFit", "GEV"), col=c("red","blue"), lty=1)
+dev.off()
+
+
+
+
+
+

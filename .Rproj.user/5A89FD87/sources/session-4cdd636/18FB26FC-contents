@@ -1,0 +1,160 @@
+library("fitdistrplus")
+library("lfstat")
+library("extRemes")
+library("evmix")
+library("SpatialExtremes")
+library('VGAM')  #For pgpd
+library("nortest")
+library(lubridate)
+library(eva)
+
+GenParPois <- function(i, FldFl, Min_AP, thres){
+  #Extracting data to fit Generalized Pareto Distribution
+  X <- FldFl$Qzpeak
+  X <- sort(X, decreasing=FALSE) #Arranging the data in ascending order
+
+  #Threshold Cutoff
+  X <- X[X>Min_AP]
+
+  #Getting unique
+  X <- unique(X)
+
+  #Threshold about AM
+  new_min <- quantile(X, probs=thres)
+  X <- X[X>new_min]
+  lenX <- length(X)
+
+  #Fitting empirical distibution
+  Fit.emp <- gringorten(X)
+
+  #Emperical distribution
+  #library(lmomco)
+  #Fit.emp2 <- pp(X, a=0.44) #Gringorten #a=0.44 is Optimized for Gumbel distribution.
+
+  #Fitting Generalized Pareto
+  gpdfit <- fevd(X, threshold = Min_AP, type="GP", method="Lmoments")
+
+  gpdfit2 <- fevd(X, threshold = Min_AP, type="GP")
+  look1 <- summary(gpdfit2)
+  AIC <- c(look1$AIC)
+
+  #Extracting parameter
+  shp <- as.numeric(gpdfit$results[2])
+  scl <- as.numeric(gpdfit$results[1])
+
+  #Getting probabilities
+  Fit.theo <- pgpd(X, shape = shp, scale = scl, loc=new_min)
+
+
+  Z <- unique(X)
+  ad_res <- gpdAd(Z)
+
+
+  #PP Plot
+  #main <- paste("GP-Emperical PP Plot for Station", i, "-", thres)
+  #plot(Fit.emp, Fit.theo, xlim=c(0,1), ylim=c(0,1), main = main)
+  #abline(a=0, b=1)
+
+
+  ks_i <- ks.test(Fit.emp,Fit.theo)
+  ks_i
+
+
+  ##############################################################################################
+  #Extracting year only
+
+  FldFl2 <- FldFl[FldFl$Qzpeak>new_min,]
+  yr <- year(FldFl2$Tzpeak)
+
+  #Getting number of peaks for each year
+  PPY <- as.data.frame(table(yr))
+  Y <- sort(PPY$Freq, decreasing=FALSE) #Getting the data in ascending order
+  lenY <- length(Y) #Number of elements in Y
+
+  #Fitting empirical distibution
+  Fit2.emp <- gringorten(Y)
+
+  #Fitting Poisson Distribution in PPY data
+  poisfit <- fitdist(Y,'pois',method='mle')
+
+  #Get lamda parameter of poisson fit
+  lam <- as.numeric(poisfit$estimate[1])
+
+  #Get the cdf using the lamda par
+  Fit2.theo <- ppois(Y, lambda = lam)
+
+  #plot(Fit2.emp,Fit2.theo)
+  #abline(a=0, b=1)
+
+  #Calculation of dispersion index
+  PPY$num <- (PPY$Freq-lam)**2 #Numerator
+  dis_ind <- sum(PPY$num)/sum(PPY$Freq)
+  dis_ind
+
+  #Histogram
+  #title <- paste("Histogram of Peak Per Year with a overlayed Poisson Distribution for Station", i)
+  #pl2 <- hist(PPY$Freq, main = title)
+
+  #t = seq(min(Y), max(Y), by = 1)
+  #lines(t, dpois(t, lambda = lam)*84, col='red', lwd=3)
+
+  #ACF Plot for the PPY
+  #title <- paste ("ACF Plot for Peak-Per-Year Frequency Data for station", i)
+  #pl3 <- Acf(PPY$Freq, main = title, cex.lab = 1, cex.main=2, cex.axis =1)
+
+  zz <- data.frame(lenX,new_min, shp,scl,new_min,AIC, ks_i$statistic, ks_i$p.value, lam, dis_ind,ad_res$statistic, ad_res$p.value)
+  colnames(zz) <- c('NoOfFlood','Thres_cfs', 'GP_shape', 'GP_scale', 'GP_Location','AIC', 'KS_Statistic', 'KS_Pvalue', 'Pois_Lam', 'Dis_Ind','AD_stat', 'AD-pval')
+
+  return (zz)
+}
+
+RP_thres <- function(i,FldFl, Min_AP){
+
+  #X_thres <- c(0.1,0.2,0.3,0.4,0.5,0.6,0.7,0.75,0.8,0.85,0.9,0.95)
+
+  #Calculating for various parameters
+  X_thres <- seq(0,0.95,0.05)
+
+
+  #Empty dataframe to store all the results
+  allthres <- data.frame()
+
+  #Number of calculations
+  n <- length(X_thres)
+
+  for (j in 1:n){
+    thres <- X_thres[j]
+    stnzz <- GenParPois(i, FldFl, Min_AP, thres)
+    allthres <- rbind(allthres, stnzz)
+  }
+
+  return(allthres)
+}
+
+#Setting working directory
+path <- 'C:\\Users\\Aalok\\OneDrive - lamar.edu\\0000000000Research\\Flooding_Risk\\Station1'
+setwd(path)
+
+FldFl <- read.csv('Stn1_FilFLood.csv')
+
+#Lower threshold to look at
+percentile <- quantile(FldFl$Qzpeak, 0.75)
+Thres_cfs <- percentile
+
+
+#Calling the functions
+allthres <- RP_thres(i,FldFl, Thres_cfs)
+allthres
+
+#Filter for at least one event per year
+allthres2 <- allthres[allthres$NoOfFlood>83,]
+allthres2
+
+#Calculation of Mean Residual
+allthres2$meanres <- allthres2$GP_scale / (1- allthres2$GP_shape)
+allthres2
+
+#Mean Residual Plot
+plot(allthres2$Thres_cfs,allthres2$meanres)
+abline(lm(meanres ~ Thres_cfs, data = allthres2), col = "blue")
+

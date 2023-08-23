@@ -1,0 +1,30 @@
+Package: FloodMetrics
+Title: Flood Metrics Analysis Tools
+Version: 0.0.0.9000
+Authors@R: 
+    c(person("Aalok Sharma", "Kafle", , "akafle1@lamar.edu", role = c("aut"),
+           comment = c(ORCID = "0000-0001-6599-0517")),
+     person("Venki", "Uddameri", , "vuddameri@lamar.edu", role = c("aut","cre","ths"),
+           comment = c(ORCID = "0000-0002-4998-0471")))
+Description: Provides tools and functions for analyzing flood metrics, including frequency analysis, statistical tests, stochastical analysis and visualizations. Aims to bridge the gap between theoretical research and practical application by providing a one-stop solution for flood analysis.
+Imports: 
+    Kendall,
+    actuar,
+    extRemes,
+    fitdistrplus,
+    forecast,
+    trend,
+    tseries,
+    zoo,
+    stats,
+    lfstat,
+    nortest,
+    dplyr,
+    eva,
+    lubridate,
+    VineCopula,
+    graphics
+License: MIT + file LICENSE
+Encoding: UTF-8
+Roxygen: list(markdown = TRUE)
+RoxygenNote: 7.2.3

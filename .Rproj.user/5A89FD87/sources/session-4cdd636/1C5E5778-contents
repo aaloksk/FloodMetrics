@@ -1,0 +1,544 @@
+library(eva)
+
+# Generate some data from GPD
+x <- rgpd(200, loc = 0, scale = 1, shape = 0.2)
+gpdAd(x)
+
+
+
+library("fitdistrplus")
+library("lfstat")
+library("extRemes")
+library("evmix")
+library("SpatialExtremes")
+library('VGAM')  #For pgpd
+library("nortest")
+library(lubridate)
+
+GenParPois <- function(i, FldFl, Min_AP, thres){
+  #Extracting data to fit Generalized Pareto Distribution
+  X <- FldFl$Qzpeak
+  X <- sort(X, decreasing=FALSE) #Arranging the data in ascending order
+  
+  #Threshold Cutoff
+  X <- X[X>Min_AP]
+  
+  X <- unique(X)
+  
+  #Threshold about AM
+  new_min <- quantile(X, probs=thres)
+  X <- X[X>new_min]
+  lenX <- length(X)
+  
+  #Fitting empirical distibution
+  Fit.emp <- gringorten(X)
+  
+  #Emperical distribution 
+  #library(lmomco)
+  #Fit.emp2 <- pp(X, a=0.44) #Gringorten #a=0.44 is Optimized for Gumbel distribution.
+  
+  #Fitting Generalized Pareto
+  gpdfit <- fevd(X, threshold = Min_AP, type="GP", method="Lmoments")
+  
+  gpdfit2 <- fevd(X, threshold = Min_AP, type="GP")
+  look1 <- summary(gpdfit2)
+  AIC <- c(look1$AIC)
+  
+  #Extracting parameter
+  shp <- as.numeric(gpdfit$results[2])
+  scl <- as.numeric(gpdfit$results[1])
+  
+  #Getting probabilities
+  Fit.theo <- pgpd(X, shape = shp, scale = scl, loc=new_min)
+  
+  
+  Z <- unique(X)
+  ad_res <- ad.test(Z)
+  
+  
+  #PP Plot
+  #main <- paste("GP-Emperical PP Plot for Station", i, "-", thres)
+  #plot(Fit.emp, Fit.theo, xlim=c(0,1), ylim=c(0,1), main = main)
+  #abline(a=0, b=1)
+  
+  
+  ks_i <- ks.test(Fit.emp,Fit.theo)
+  ks_i
+  
+  
+  ##############################################################################################
+  #Extracting year only
+  
+  FldFl2 <- FldFl[FldFl$Qzpeak>new_min,]
+  yr <- year(FldFl2$Tzpeak)
+  
+  #Getting number of peaks for each year
+  PPY <- as.data.frame(table(yr))
+  Y <- sort(PPY$Freq, decreasing=FALSE) #Getting the data in ascending order
+  lenY <- length(Y) #Number of elements in Y
+  
+  #Fitting empirical distibution
+  Fit2.emp <- gringorten(Y)
+  
+  #Fitting Poisson Distribution in PPY data
+  poisfit <- fitdist(Y,'pois',method='mle')
+  
+  #Get lamda parameter of poisson fit
+  lam <- as.numeric(poisfit$estimate[1])
+  
+  #Get the cdf using the lamda par
+  Fit2.theo <- ppois(Y, lambda = lam)
+  
+  #plot(Fit2.emp,Fit2.theo)
+  #abline(a=0, b=1)
+  
+  #Calculation of dispersion index
+  PPY$num <- (PPY$Freq-lam)**2 #Numerator
+  dis_ind <- sum(PPY$num)/sum(PPY$Freq)
+  dis_ind
+  
+  #Histogram
+  #title <- paste("Histogram of Peak Per Year with a overlayed Poisson Distribution for Station", i)
+  #pl2 <- hist(PPY$Freq, main = title)
+  
+  #t = seq(min(Y), max(Y), by = 1)
+  #lines(t, dpois(t, lambda = lam)*84, col='red', lwd=3)
+  
+  #ACF Plot for the PPY
+  #title <- paste ("ACF Plot for Peak-Per-Year Frequency Data for station", i)
+  #pl3 <- Acf(PPY$Freq, main = title, cex.lab = 1, cex.main=2, cex.axis =1)
+  
+  zz <- data.frame(lenX, thres, shp,scl,new_min,AIC, ks_i$statistic, ks_i$p.value, lam, dis_ind,ad_res$statistic)
+  colnames(zz) <- c('NoOfFlood','Threshold', 'GP_shape', 'GP_scale', 'GP_Location','AIC', 'KS_Statistic', 'KS_Pvalue', 'Pois_Lam', 'Dis_Ind','AD_stat')
+  
+  return (zz)
+}
+
+
+GenParPois_woH <- function(i, FLdFl, Min_AP, thres){
+  #Extracting data to fit Generalized Pareto Distribution
+  X <- FldFl$Qzpeak
+  X <- sort(X, decreasing=FALSE) #Arranging the data in ascending order
+  
+  #Threshold Cutoff
+  X <- X[X>Min_AP]
+  
+  
+  #Threshold about AM
+  new_min <- quantile(X, probs=thres)
+  X <- X[X>new_min]
+  lenX <- length(X)
+  
+  #Without Harvey
+  X[lenX] <- X[lenX-1]
+  
+  #Fitting empirical distibution
+  Fit.emp <- gringorten(X)
+  
+  #Emperical distribution 
+  #library(lmomco)
+  #Fit.emp2 <- pp(X, a=0.44) #Gringorten #a=0.44 is Optimized for Gumbel distribution.
+  
+  #Fitting Generalized Pareto
+  gpdfit <- fevd(X, threshold = Min_AP, type="GP", method="Lmoments")
+  
+  #Extracting parameter
+  shp <- as.numeric(gpdfit$results[2])
+  scl <- as.numeric(gpdfit$results[1])
+  
+  #Getting probabilities
+  Fit.theo <- pgpd(X, shape = shp, scale = scl, location=new_min)
+  
+  #PP Plot
+  main <- paste("GP-Emperical PP Plot for Station", i)
+  plot(Fit.emp, Fit.theo, xlim=c(0,1), ylim=c(0,1), main = main)
+  abline(a=0, b=1)
+  
+  
+  ks_i <- ks.test(Fit.emp,Fit.theo)
+  ks_i
+  
+  
+  ##############################################################################################
+  #Extracting year only
+  
+  FldFl2 <- FldFl[FldFl$Qzpeak>new_min,]
+  yr <- year(FldFl2$Tzpeak)
+  
+  #Getting number of peaks for each year
+  PPY <- as.data.frame(table(yr))
+  Y <- sort(PPY$Freq, decreasing=FALSE) #Getting the data in ascending order
+  lenY <- length(Y) #Number of elements in Y
+  
+  #Fitting empirical distibution
+  Fit2.emp <- gringorten(Y)
+  
+  #Fitting Poisson Distribution in PPY data
+  poisfit <- fitdist(Y,'pois',method='mle')
+  
+  #Get lamda parameter of poisson fit
+  lam <- as.numeric(poisfit$estimate[1])
+  
+  #Get the cdf using the lamda par
+  Fit2.theo <- ppois(Y, lambda = lam)
+  
+  #plot(Fit2.emp,Fit2.theo)
+  #abline(a=0, b=1)
+  
+  #Calculation of dispersion index
+  PPY$num <- (PPY$Freq-lam)**2 #Numerator
+  dis_ind <- sum(PPY$num)/sum(PPY$Freq)
+  dis_ind
+  
+  #Histogram
+  title <- paste("Histogram of Peak Per Year with a overlayed Poisson Distribution for Station", i)
+  pl2 <- hist(PPY$Freq, main = title)
+  
+  t = seq(min(Y), max(Y), by = 1)
+  lines(t, dpois(t, lambda = lam)*84, col='red', lwd=3)
+  
+  #ACF Plot for the PPY
+  title <- paste ("ACF Plot for Peak-Per-Year Frequency Data for station", i)
+  pl3 <- Acf(PPY$Freq, main = title, cex.lab = 1, cex.main=2, cex.axis =1)
+  
+  zz <- data.frame(lenX, thres, shp,scl,new_min, ks_i$statistic, ks_i$p.value, lam, dis_ind)
+  colnames(zz) <- c('NoOfFlood','Threshold', 'GP_shape', 'GP_scale', 'GP_Location', 'KS_Statistic', 'KS_Pvalue', 'Pois_Lam', 'Dis_Ind')
+  
+  return (zz)
+}
+
+RP_thres <- function(i,FldFl, Min_AP){
+  
+  X_thres <- c(0.1,0.2,0.3,0.4,0.5,0.6,0.7,0.75,0.8,0.85,0.9,0.95)
+  allthres <- data.frame()
+  for (j in 1:12){
+    thres <- X_thres[j]
+    stnzz <- GenParPois(i, FldFl, Min_AP, thres)
+    allthres <- rbind(allthres, stnzz)
+  }
+  
+  return(allthres)
+}
+
+
+RP_thres_woH <- function(i,FldFl, Min_AP){
+  
+  X_thres <- c(0.1,0.2,0.3,0.4,0.5,0.6,0.7,0.75,0.8,0.85,0.9,0.95)
+  allthres <- data.frame()
+  for (j in 1:12){
+    thres <- X_thres[j]
+    stnzz <- GenParPois_woH(i, FldFl, Min_AP, thres)
+    allthres <- rbind(allthres, stnzz)
+  }
+  
+  return(allthres)
+}
+
+
+
+
+#Setting working directory
+path <- 'C:\\Users\\Aalok\\OneDrive - lamar.edu\\0000000000Research\\Flooding_Risk\\WD\\Daily'
+setwd(path)
+
+
+#Importing csv file with filename for each station
+fn <- read.csv('fnames.csv')
+head(fn)
+
+#Number of watersheds to perform the operation
+n_rows <-nrow(fn)
+
+
+
+zz2 = data.frame()
+
+
+i=1
+
+par(mfrow=c(1,1))
+for(i in seq(1,n_rows,1)){
+  #INPUT IS FLOOD DATA AFTER INDEPENDENCE CHECK
+  #This dataframe includes Peak flows with their corresponding time
+  FldFl <- read.csv(fn$Fil_Flood[i])
+  allthres <- RP_thres(i,FldFl, fn$Min_AMS[i])
+  
+  
+  #Sample weighted AIC
+  k <- 3
+  allthres$AICsw <- allthres$AIC/ allthres$NoOfFlood
+  AIC_plus <- ((2*(k**2)) + (2*k)) / (allthres$NoOfFlood - k - 1)
+  
+  AIC_plus <- (2*(k+1)*(k+2)) / (allthres$NoOfFlood - k - 2)
+  
+  allthres$AICc <- allthres$AICsw + AIC_plus
+  allthres
+  
+  zz2 <- rbind(zz2, allthres)
+  
+  plot(allthres$NoOfFlood, allthres$AICc, pch = 20, col="blue")
+  
+  #plot(allthres$NoOfFlood, allthres$AICc, type='l')
+}
+
+
+
+
+#INPUT IS FLOOD DATA AFTER INDEPENDENCE CHECK
+#This dataframe includes Peak flows with their corresponding time
+FldFl <- read.csv(fn$Fil_Flood[i])
+allthres <- RP_thres(i,FLdFl, fn$Min_AMS[i])
+
+
+#Sample weighted AIC
+k <- 3
+allthres$AICsw <- allthres$AIC/ allthres$NoOfFlood
+AIC_plus <- ((2*(k**2)) + (2*k)) / (allthres$NoOfFlood - k - 1)
+
+AIC_plus <- (2*(k+1)*(k+2)) / (allthres$NoOfFlood - k - 2)
+
+allthres$AICc <- allthres$AICsw + AIC_plus
+allthres
+
+par(mfrow=c(1,1))
+plot(allthres$NoOfFlood, allthres$AIcC, type='l')
+
+
+
+
+
+
+
+
+
+
+
+#################################################################################################
+#STATION1
+
+#Flood Data after Independence Check
+#This data frame includes Peak flows with their corresponding time
+FldFl <- read.csv('Stn1_FilFLood.csv')
+i <- 1 #Station No.
+allthres <- RP_thres(i,FldFl, Min_AP)
+
+
+
+
+
+
+
+
+
+
+#################################################################################################
+#STATION2
+
+FldFl <- read.csv('Stn2_FilFlood.csv')
+i <- 2
+allthres2 <- RP_thres(i, FldFl, Min_AP2)
+#write.csv(allthres2, "St2_SP_Pois_Stat.csv", row.names = FALSE)
+#write.csv(allthres2, "St2_SP_Pois_Stat_nH.csv", row.names = FALSE)
+
+
+#STATION3
+#################################################################################################
+FldFl <- read.csv('Stn3_FilFlood.csv')
+i <- 3
+allthres3 <- RP_thres(i, FldFl, Min_AP3)
+#write.csv(allthres3, "St3_SP_Pois_Stat.csv", row.names = FALSE)
+#write.csv(allthres3, "St3_SP_Pois_Stat_nH.csv", row.names = FALSE)
+
+
+#STATION4
+#################################################################################################
+FldFl <- read.csv('Stn4_FilFlood.csv')
+i <- 4
+allthres4 <- RP_thres(i, FldFl, Min_AP4)
+#write.csv(allthres4, "St4_SP_Pois_Stat.csv", row.names = FALSE)
+#write.csv(allthres4, "St4_SP_Pois_Stat_nH.csv", row.names = FALSE)
+
+
+#STATION5
+################################################################################################
+FldFl <- read.csv('Stn5_FilFlood.csv')
+i <- 5
+allthres5 <- RP_thres(i, FldFl, Min_AP5)
+#write.csv(allthres5, "St5_SP_Pois_Stat.csv", row.names = FALSE)
+#write.csv(allthres5, "St5_SP_Pois_Stat_nH.csv", row.names = FALSE)
+
+
+
+#STATION6
+#################################################################################################
+FldFl <- read.csv('Stn6_FilFlood.csv')
+i <- 6
+allthres6 <- RP_thres(i, FldFl, Min_AP6)
+#write.csv(allthres6, "St6_SP_Pois_Stat.csv", row.names = FALSE)
+#write.csv(allthres6, "St6_SP_Pois_Stat_nH.csv", row.names = FALSE)
+
+
+#################################################################################################
+#################################################################################################
+#################################################################################################
+#################################################################################################
+library('extRemes')
+library('VGAM')  #For pgpd
+library('lfstat') #FOr gringorten
+library('forecast') #For ACF test
+library('lubridate')
+
+
+#Setting Working Directory
+setwd('C:\\Users\\Aalok\\OneDrive - lamar.edu\\00 GAGESII\\SET - SWL Stations\\DailyData_All')
+
+#Importing the Fit Parameterd of GP and Poisson
+#a <- read.csv("SP_Pois_Stat.csv")
+
+
+#a <- read.csv("St1_SP_Pois_Stat.csv")
+#a <- read.csv("St2_SP_Pois_Stat.csv")
+#a <- read.csv("St3_SP_Pois_Stat.csv")
+a <- read.csv("St4_SP_Pois_Stat.csv")
+#a <- read.csv("St5_SP_Pois_Stat.csv")
+#a <- read.csv("St6_SP_Pois_Stat.csv")
+
+#a_nH <- read.csv("St1_SP_Pois_Stat_nH.csv")
+a_nH <- read.csv("St4_SP_Pois_Stat_nH.csv")
+#a <- read.csv("St5_SP_Pois_Stat_nH.csv")
+
+
+GEVPars <- function(a){
+  #Get GEV parameters
+  a$GEV_loc <- a$GP_Location + (a$GP_scale/a$GP_shape)*(1-((a$Pois_Lam)**((-1)*a$GP_shape)))
+  a$GEV_scale <- a$GP_scale*((a$Pois_Lam)**((-1)*a$GP_shape))
+  a$GEV_shp <- a$GP_shape
+  
+  return(a)
+}
+
+#Get GEV parameters
+a$GEV_loc <- a$GP_Location + (a$GP_scale/a$GP_shape)*(1-((a$Pois_Lam)**((-1)*a$GP_shape)))
+a$GEV_scale <- a$GP_scale*((a$Pois_Lam)**((-1)*a$GP_shape))
+a$GEV_shp <- a$GP_shape
+
+
+
+
+#Return Period from PDS
+#Function takes stnid, shape scale and location of GEV distribution
+#Returns Return Period for 5, 10, 25, 50, 100, 200, 500 and 1000 years.
+RetPer <- function(i, thres,No_of_Fld, shp,scl,loc){
+  RP2 <- qgev(0.5, shape = shp, scale=scl, location=loc)
+  RP5 <- qgev(0.8, shape = shp, scale=scl, location=loc) #Return Period for 5 years # 1- 1/5 = 0.8
+  RP10 <- qgev(0.9, shape = shp, scale=scl, location=loc) #Return Period for 10 years
+  RP20 <- qgev(0.95, shape = shp, scale=scl, location=loc)
+  RP25 <- qgev(0.96, shape = shp, scale=scl, location=loc)
+  RP50 <- qgev(0.98, shape = shp, scale=scl, location=loc)
+  RP100 <- qgev(0.99, shape = shp, scale=scl, location=loc)
+  RP200 <- qgev(0.995, shape = shp, scale=scl, location=loc)
+  RP500 <- qgev(0.998, shape = shp, scale=scl, location=loc)
+  RP1000 <- qgev(0.999, shape = shp, scale=scl, location=loc) #Return Period for 1000 years # 1-1/1000 = 0.999
+  RPs <- data.frame(i, thres,No_of_Fld, RP2, RP5, RP10, RP20, RP25, RP50, RP100, RP200, RP500, RP1000)
+  
+  return(RPs)
+}
+
+AllRPFunc <- function(a){
+  All_RP <- data.frame()
+  for (i in 1:12){
+    shape <- a$GEV_shp[i]
+    scale<-a$GEV_scale[i]
+    location<-a$GEV_loc[i]
+    thres <- a$GP_Location[i]
+    No_of_Fld <- a$NoOfFlood[i]
+    
+    RP_temp <- RetPer(i, thres,No_of_Fld, shape,scale,location)
+    All_RP <- rbind(All_RP, RP_temp)
+  }
+  return(All_RP)
+}
+
+AllRP <- AllRPFunc(a)
+
+
+#For No Harvey
+anH <- GEVPars(a_nH)
+AllRP_nH <- AllRPFunc(anH)
+
+diff <- AllRP - AllRP_nH
+diff
+
+diff2 <- subset(diff, select = -c(i, thres, No_of_Fld) )
+
+heatmap(as.matrix(diff2))
+
+
+heatmap(as.matrix(diff2), col = colorRampPalette(c("blue", "white", "red"))(100), 
+        breaks = seq(0, 10, by = 1), scale = "none")
+
+
+
+
+
+library("ggplot2")
+library("reshape")   
+
+rownames(diff2) <- AllRP$thres
+data_melt <- melt(diff2)
+head(data_melt)
+
+
+ggp <- ggplot(data_melt, aes(X1, X2)) +                           # Create heatmap with ggplot2
+  geom_tile(aes(fill = value))
+ggp   
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+All_RP <- AllRP
+
+par(mfrow=c(1,1))
+plot(All_RP$thres, All_RP$RP5, main="5 Year RP", xlab = "Flood Threshold", ylab="Discharge (cfs)", type='l')
+
+par(mfrow=c(2,3))
+
+
+
+plot(All_RP$thres, All_RP$RP2, main="2 Year Return Period", 
+     xlab = "Flood Threshold", ylab="Discharge (cfs)", pch = 20 , col = 'red', cex=3.5,
+     xlim = c(0, 8000), ylim=c(0,30000))
+abline(h=9740, col="blue", lty = 2, lwd = 3)
+abline(v=397, col='gray', lty =2, lwd = 3)
+abline(v=5534, col='red', lty =2, lwd = 3)
+grid()
+
+plot(All_RP$thres, All_RP$RP5, main="5Year RP", xlab = "Flood Threshold", ylab="Discharge (cfs)")
+abline(h=7598, col="blue")
+
+plot(All_RP$thres, All_RP$RP10, main="10Year RP", xlab = "Flood Threshold", ylab="Discharge (cfs)")
+abline(h=34022, col="blue")
+
+plot(All_RP$thres, All_RP$RP20, main="20Year RP", xlab = "Flood Threshold", ylab="Discharge (cfs)")
+abline(h=48502, col="blue")
+
+plot(All_RP$thres, All_RP$RP25, main="25Year RP", xlab = "Flood Threshold", ylab="Discharge (cfs)")
+abline(h=53780, col="blue")
+
+plot(All_RP$thres, All_RP$RP50, main="50Year RP", xlab = "Flood Threshold", ylab="Discharge (cfs)")
+abline(h=72290, col="blue")
+
+mtext("Station 1 Plots",                   # Add main title
+      side = 2,
+      line = -2,
+      outer = TRUE)
